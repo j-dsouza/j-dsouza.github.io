@@ -4,11 +4,11 @@ title: "James D'Souza"
 theme: "PaperMod"
 params:
   homeInfoParams:
-    Title: Hi there 👋
+    Title: Hi there 🐒
     Content: >
       - I'm a Software Engineer / Data Scientist at [Ki Insurance](https://ki-insurance.com), working on systems to understand and manage risk on insurance policies.
 
-      - I like doing fun things with data, and turning those into reliable and maintainable software
+      - I like doing fun things with data, and turning those into reliable and maintainable software.
 
   socialIcons: # optional
     - name: github
