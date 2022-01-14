@@ -15,5 +15,3 @@ params:
       url: "https://www.github.com/j-dsouza"
     - name: linkedin
       url: "https://www.linkedin.com/in/james-d-souza-9368a150/"
-    - name: email
-      url: "mailto:james.dsouza@outlook.com"
