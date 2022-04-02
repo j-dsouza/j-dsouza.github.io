@@ -46,8 +46,199 @@ as -o filename.o filename.s
 ld filename -o ./bin/filename -e _start -arch arm64 -L /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib -lSystem
 ```
 
+# Our first assembly program
+
+Lets look at an extremely simple assembly program. The following codeblock is a Hello World program that will print out the string `Hello World!` when run.
+
+{{<collapse summary="Hello world in assembly">}}
+
+```armasm
+.global _start              @ Provide program starting address to linker
+helloworld:      .ascii  "Hello World!\n"
+
+@ Setup the parameters to print hello world
+@ and then call Linux to do it.
+
+_start: mov X0, #1          @ 1 = StdOut
+        adr X1, helloworld  @ string to print
+        mov X2, #13         @ length of our string
+        mov X16, #4         @ MacOS write system call
+        svc 0               @ Call linux to output the string
+
+@ Setup the parameters to exit the program
+@ and then call Linux to do it.
+
+        mov     X0, #0      @ Use 0 return code
+        mov     X16, #1     @ Service command code 1 terminates this program
+        svc     0           @ Call MacOS to terminate the program
+```
+
+{{</collapse>}}
+
+There are a few interesting things to note. Starting from the top..
+
+```armasm
+.global _start              @ Provide program starting address to linker
+helloworld:      .ascii "Hello World!\n"
+```
+
+In the above code, the `.global` directive allows you to mark specific parts of your code to ensure that they are added to the object code (`.o` file), in order for the linker to find them. In the commands above, this is what allows the linker to use the `-e _start` flag to understand where to begin the code. In conjunction with the flag in the linker, we are telling the program where it should start.
+
+The second line is pretty self-explanatory, and allows us to easily define the string `"Hello World"` in ascii. Importantly, we can refer to this from other places in our code so it acts like an immutable variable.
+
+```armasm
+_start: mov X0, #1          @ 1 = StdOut
+```
+
+This is our first _real_ line of code. The very first part, `_start`, tells the linker that this is the beginning of our program, as mentiond above. We then have our first instruction, `mov`. Instructions are the building blocks of any assembly language program, and they generally take the form of an instruction followed by two or three parameters. The `mov` instruction simply moves the thing from the second parameter into the first parameter. In this case, we are moving the number `1` into register `X0`.
+
+Registers are areas which contain very fast storage inside the processor. They can either hold values, or point to specific memory locations. In my M1 Pro chip, there are 29 general-purpose registers (`x0`-`x28`), plus a number of special registers. The only special register that we will be dealing with is `sp`, or the stack pointer. This is used to point to an area of memory that you are using in your program.
+
+```armasm
+_start: mov X0, #1          @ 1 = StdOut
+        adr X1, helloworld  @ string to print
+        mov X2, #13         @ length of our string
+        mov X16, #4         @ MacOS write system call
+        svc 0               @ Call linux to output the string
+```
+
+The above block of code constitutes a syscall. This is the process of our program interacting with the outside world, ie, the operating system itself. The secret incantation required to perform different types of syscall varies depending on your processor, but essentially requires putting data into the correct registers, then calling the instruction `scv 0`.
+
+The syscall above is to write to stdout. What we had to do here was to put the correct [Mac syscall code](https://opensource.apple.com/source/xnu/xnu-1504.3.12/bsd/kern/syscalls.master) into the `x16` register, and then you pass the arguments to the syscall into `x0` through `x2`. We can look up the required arguments and the order we need to pass them in by looking at the man page for the `write` function, using `man 2 write`, or similar for whichever syscall we are attempting to do.
+
+# Reading a file
+
+There are several ways we could have read in our data, for example simply defining it inside our program, or passing it in through `stdout`. For this challenge, I decided to read the input from a file. To do this, we need to interact with the operating system, ie, use a syscall. There are three steps required as part of reading a file, all of which require different syscalls:
+
+1. Open the file in read mode
+2. Read the contents of the file
+3. Close the file
+
+As mentioned above, we can use Apple's documentation, coupled with the man pages to get documentation of how to use these syscalls, and ultimately we end up with the following code in order to open the file and read our data into memory.
+
+{{<collapse summary="Reading from file in assembly">}}
+
+```armasm
+.text
+filename:     .ascii "/path/to/file"
+
+_start:
+@ Open the file to read input
+    adr x0, filename     @ Filename
+    mov x1, #0           @ Read only
+    mov x16, #5          @ Open
+    svc 0                @ Call
+
+    mov x19, x0          @ Save file descriptor
+                         @ (non-negative integer == success) to x19
+
+@ Read from file
+    sub sp, sp, 0x10000  @ Allocate 2^16 bits on the stack
+    mov x1, sp           @ Buffer address (on the stack)
+    mov x2, 0x10000      @ Buffer size
+    mov x16, #3          @ Read
+    svc 0                @ Call
+
+    mov x20, x0          @ Returns the amount of bytes read. Store in x20
+
+@ Close file
+    mov x0, x19          @ Move file descriptor back to x0
+    mov x16, #6          @ Close
+    svc 0                @ Call
+```
+
+{{</collapse>}}
+
+At this point, we have our file contents in memory at the location referred to by `sp`. All of the data has been read in as ASCII characters, which means we could successfully print those characters out to `stdout`, but that is not ideal for doing numeric calculations.
+
+# Converting ASCII characters to numbers
+
+In memory right now, we will have something like the `ASCII` row shown below. Below it is the integer representation of each of the ASCII characters. Ultimately, we want to get to a point where we have numbers, for example `199` and `200`, stored in a way where we can access each number in turn.
+
+```
+ASCII | 49 57 57 10 50 48 48 10
+int   | 1  9  9  \n 2  0  0  \n
+```
+
+To perform the conversion, we need to run through memory starting at sp, and then:
+
+1. Check for a newline - If there is one, we are at the end of the number
+2. Convert to an integer
+3. Multiply previous total by 10
+4. Add new number to previous total
+   Repeat until you hit a newline
+
+So, if we are reading 199\n (from the example above), we will do:
+
+```
+Previous total | New digit
+0              | 49 -> 1
+1 (x10 = 10)   | 57 -> 9
+19 (x10 = 190) | 59 -> 9
+199            | \n -> Done
+```
+
+Once we have our number, we can overwrite the digit in the stack. As our numbers will fit into a 32 bit int (=4 bytes, or ASCII chars), we can freely overwrite past data without accidentally altering data we haven't read yet.
+
+The code to do this is as follows:
+
+{{<collapse summary="Convert ASCII characters into numbers">}}
+
+```armasm
+    mov x9, sp                  @ 1. Read position in the buffer
+    mov x10, sp                 @ 2. Write position in the buffer
+    mov x11, 0                  @ 3. Accumulated total
+    mov x12, 0                  @ 4. Current byte we're reading
+    mov x13, sp                 @ 5. The end of our useful information. sp =
+    add x13, x13, x20           @    start of our information. x20 contains
+    add x13, x13, x20           @    the amount of bytes that we read from
+    add x13, x13, 1             @    the file.
+
+_convert_loop_start:
+    ldrb w12, [x9]              @ Read value at x9 into x12 (1 byte)
+    cmp x12, 10                 @ If   x12 == 10 (= \n)
+    beq _convert_loop_newline   @ Then branch to newline code
+    sub x12, x12, 48            @ Else sub 48 to get back to real number
+    mov x14, 10                 @ So we can multiply by 10
+    mul x11, x11, x14           @ Multiply accumulated total by 10
+    add x11, x11, x12           @ Add new digit to accumulated total
+
+    b _convert_loop_end         @ Glorious success
+
+_convert_loop_newline:
+    str w11, [x10]              @ Store x11 (accumulated total) at memory
+                                @ position of x10 (write position)
+    add x10, x10, 4             @ Increment x10 (write position) by 4 bytes
+    mov x11, 0                  @ Reset x11 (accumulated total)
+
+                                @ Onwards to _convert_loop_end
+
+_convert_loop_end:
+    add x9, x9, 1               @ Increment x9 (read position) by 1 byte
+    cmp x13, x9                 @ Compare read position against end of buffer
+    bne _convert_loop_start     @ If not at end of buffer
+
+    str w11, [x10]              @ Store our last number
+```
+
+{{</collapse>}}
+
+There are a few new things in this code, namely the comparison , `cmp`, and branching, `beq`, `bne` operators. These are the fundamental building blocks of if statements and loops in modern programming languages. As you can see, we are also starting to write something resembling functions, eg `_convert_loop_start`, which are used to add some sense and readability to our control flow.
+
+Comparison and branching operators allow us to write code such as the following very basic if statement - This can quite easily be turned into loops by jumping to an instruction further above the point in the program you are in at any point:
+
+```armasm
+cmp x12, 10                    @ Compare the value in register x12 to 10
+bne _code_to_run_if_not_equal  @ If x12 != 10, jump to the section of code called _code_to_run_if_not_equal
+add x12, 10                    @ Otherwise, add 10 to the value in register x12
+```
+
+# References
+
 [Reading from a file](https://titanwolf.org/Network/Articles/Article?AID=860a4086-c513-4475-a7b0-7ba01c4c48a8)
+
 [LLDB cheatsheet](https://lldb.llvm.org/use/map.html)
+
 [Hex converter](https://www.scadacore.com/tools/programming-calculators/online-hex-converter/)
+
 [Some basics](https://azeria-labs.com/arm-data-types-and-registers-part-2/)
-[Mac syscalls](https://opensource.apple.com/source/xnu/xnu-1504.3.12/bsd/kern/syscalls.master)
