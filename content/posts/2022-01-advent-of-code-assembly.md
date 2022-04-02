@@ -1,7 +1,7 @@
 ---
 title: "Assembly"
 date: 2022-01-08T10:15:19Z
-draft: true
+draft: false
 ---
 
 # What's the goal?
@@ -223,6 +223,8 @@ _convert_loop_end:
 
 {{</collapse>}}
 
+> Note: At this point, we have stored the memory location of the start of our data inside the stack pointer, `sp` and the end of our data is in `x13`. These will both be useful in future
+
 There are a few new things in this code, namely the comparison , `cmp`, and branching, `beq`, `bne` operators. These are the fundamental building blocks of if statements and loops in modern programming languages. As you can see, we are also starting to write something resembling functions, eg `_convert_loop_start`, which are used to add some sense and readability to our control flow.
 
 Comparison and branching operators allow us to write code such as the following very basic if statement - This can quite easily be turned into loops by jumping to an instruction further above the point in the program you are in at any point:
@@ -233,7 +235,144 @@ bne _code_to_run_if_not_equal  @ If x12 != 10, jump to the section of code calle
 add x12, 10                    @ Otherwise, add 10 to the value in register x12
 ```
 
+After reading the [advent of code input file](https://adventofcode.com/2021/day/1/input) into memory, we can read the contents using [lldb](https://lldb.llvm.org/) to check that it contains what we expected. Lldb gives the following output when we read the first 16 blocks of memory at our stack pointer:
+
+```
+(lldb) x/16x `$sp`
+0x16fdef5c0: 0x000000bf 0x000000b9 0x000000bc 0x000000bd
+0x16fdef5d0: 0x000000cc 0x000000d5 0x000000d7 0x000000e3
+0x16fdef5e0: 0x000000de 0x000000dd 0x000000ec 0x000000eb
+0x16fdef5f0: 0x000000ec 0x000000e8 0x000000e0 0x000000e4
+```
+
+> Note: These numbers are "little-endian", ie, numbers towards the right are less significant than those on the left
+
+Using a Hex converter, we can translate this to the numbers that this represents, which luckily represents the correct numbers:
+
+```
+0x16fdef5c0: 191 185 188 189
+0x16fdef5d0: 204 213 215 227
+0x16fdef5e0: 222 221 236 235
+0x16fdef5f0: 236 232 224 228
+```
+
+# Performing the calculation
+
+Now, we have our numbers stored in memory correctly, we need to perform our calculation. This invovles looping through the numbers, comparing each number to the previous one. If the next number is larger than the previous, we need to increment a counter by 1.
+
+{{<collapse summary="Perform increment calculation">}}
+
+```armasm
+_processing_start:
+    add x9, sp, 4                @ 1. Read position in the buffer (start off
+                                 @    at sp + 2. This lets us avoid any issues
+                                 @    relating to the first number having
+                                 @    nothing to compare against)
+    ldr w11, [sp]                @ 2. Previous 32-bit number
+    mov x12, 0                   @ 3. Current 32-bit number
+    mov x14, 0                   @ 4. A counter tracking increases
+    add x13, x10, 4              @ 5. The end of our useful information
+
+_count_loop_start:
+    ldr w12, [x9]                @ Load current number into x12 (use w12 to
+                                 @ get 32 bits)
+    cmp x12, x11                 @ Compare w12 and w11
+    blt _count_loop_no_increment @ If less than, don't increment counter
+
+_count_loop_increment:
+    add x14, x14, 1              @ Increment x14 (counter) by 1
+
+_count_loop_no_increment:
+    mov x11, x12                 @ Move current number into previous number
+    add x9, x9, 4                @ Add 2 to read position
+    cmp x9, x13                  @ Compare current read position to end of
+                                 @ useful info
+    bne _count_loop_start        @ If not yet at end of file, back to start of
+                                 @ loop
+
+```
+
+{{</collapse>}}
+
+In the above code, we are using the register `x14` as our counter, and therefore out answer _should_ be inside that register. Unfortunately, it is a 32-bit integer, so we need to convert it back to ASCII so that we can display it.
+
+# Printing our our answer
+
+We can use a similar trick to before to do this conversion - Namely, we need to repeatedly divide the number by 10 and store the remainder, converting all of our remainders into ASCII until we get to the end of the number.
+
+For example:
+
+```
+1709 / 10 = 170 | 9
+170 / 10  = 17  | 0
+17 / 10   = 1   | 7
+1 / 10    = 0   | 1
+```
+
+Reading backwards, we get our number in single integers. We can then add 48 to each of these to get our ASCII characters, and finally print to stdout.
+
+{{<collapse summary = "Convert integer to ASCII and print to stdout">}}
+
+```armasm
+_print_start:
+    mov x9, 0                   @ The remainder
+    mov x10, x14                @ Our remaining number
+    mov x11, 0                  @ A counter of number of digits
+    mov x12, 10                 @ To help divide by 10
+    mov x13, sp                 @ Write location for the characters to print
+    add x13, x13, 3             @ Cheating a bit - I know the output is 4
+                                @ digits, so this lets us start at a position
+                                @ on the stack and work backwards without
+                                @ running out of room.
+    mov x15, 0                  @ Helper
+    mov x17, 0                  @ Another helper
+
+_print_loop_start:
+    udiv x15, x10, x12          @ Stores quotient in x15
+    mov x17, x10                @ Store original number in x17
+    mov x10, x15                @ Store quotient in x10
+    mul x15, x15, x12           @ Store quotient * 10 in x15
+    sub x9, x17, x15            @ Calculate remainder
+
+    add x9, x9, 48              @ Convert to ascii
+    strb w9, [x13]              @ Store character in memory
+
+    add x11, x11, 1             @ Add 1 to counter
+    sub x13, x13, 1             @ Decrease write location by 1
+
+    cmp x10, 0                  @ If quotient = 0, we are done
+    bne _print_loop_start       @ Else, back to our print loop
+
+    add x11, x11, 1             @ Add 1 to counter to print the final digit
+
+_print_to_stdout:
+    mov x0, #1                  @ 1 = stdout
+    mov x1, x13                 @ String to print out
+    mov x2, x11                 @ length of string
+    mov x16, #4                 @ write
+    svc 0                       @ Call
+
+_exit:
+    mov     x0, #0              @ Use 0 return code
+    mov     x16, #1             @ Exit program
+    svc     0                   @ Call
+```
+
+{{</collapse>}}
+
+And finally, our answer has been printed to the console!
+
+# What did I learn?
+
+It's really interesting trying to write code with literally zero abstractions - You have to really think about how computers work in their most basic form. I'd recommend it as a challenge to anyone who likes computers.
+
+I'd never properly thought about how a program interacts with the operating system through syscalls, though it makes a lot of sense having been through this process.
+
+Though my implementation is almost certainly not the most efficient from either a performance or lines-of-code perspective, the fact that this took over 200 lines of assembly code (admittedly a fair few of them are comments!) has really given me an appreciation of what early programmers accomplished, as well as a huge appreciation for how easy higher-level languages have made programming. You could write this program quite comfortably in 3 lines of Python!!
+
 # References
+
+A few interesting links that I found during this that really helped me during this process.
 
 [Reading from a file](https://titanwolf.org/Network/Articles/Article?AID=860a4086-c513-4475-a7b0-7ba01c4c48a8)
 
