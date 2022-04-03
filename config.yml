@@ -15,4 +15,5 @@ params:
       url: "https://www.github.com/j-dsouza"
     - name: linkedin
       url: "https://www.linkedin.com/in/james-d-souza-9368a150/"
-  googleAnalyticsID: "G-YE0ZY0PPV9"
+
+  googleAnalytics: "G-YE0ZY0PPV9"
