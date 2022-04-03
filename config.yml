@@ -2,6 +2,7 @@ baseURL: "https://j-dsouza.github.io"
 languageCode: "en-us"
 title: "James D'Souza"
 theme: "PaperMod"
+googleAnalytics: "G-YE0ZY0PPV9"
 params:
   homeInfoParams:
     Title: Hi there 🐒
@@ -15,5 +16,3 @@ params:
       url: "https://www.github.com/j-dsouza"
     - name: linkedin
       url: "https://www.linkedin.com/in/james-d-souza-9368a150/"
-
-  googleAnalytics: "G-YE0ZY0PPV9"
