@@ -153,7 +153,7 @@ At this point, we have our file contents in memory at the location referred to b
 
 # Converting ASCII characters to numbers
 
-In memory right now, we will have something like the `ASCII` row shown below. Below it is the integer representation of each of the ASCII characters. Ultimately, we want to get to a point where we have numbers, for example `199` and `200`, stored in a way where we can access each number in turn.
+In memory right now, we will have something like the `ASCII` row shown below. Below it is the integer representation of each of the ASCII characters - You can convert very simply with an [ASCII table](https://www.rapidtables.com/code/text/ascii-table.html), for numbers, you do this simply by taking 48 off the ASCII representation. Ultimately, we want to get to a point where we have numbers, for example `199` and `200`, stored in a way where we can access each number in turn.
 
 ```
 ASCII | 49 57 57 10 50 48 48 10
