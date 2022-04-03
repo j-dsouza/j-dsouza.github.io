@@ -2,7 +2,6 @@ baseURL: "https://j-dsouza.github.io"
 languageCode: "en-us"
 title: "James D'Souza"
 theme: "PaperMod"
-googleAnalytics: "G-YE0ZY0PPV9"
 params:
   homeInfoParams:
     Title: Hi there 🐒
